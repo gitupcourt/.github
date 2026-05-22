@@ -1,146 +1,28 @@
 name: build-and-bump
 
-# Reusable workflow. See README.md in this repo for the calling pattern.
-#
-# Builds container images per push and pushes to GHCR. Manifest-bump PR
-# step lives in a separate job that's gated on the HOMELAB_PAT secret.
-
 on:
   workflow_call:
     inputs:
       app_name:
-        description: "Logical app name. Used as the GHCR image-name prefix."
         required: true
         type: string
       images:
-        description: "JSON array of {name, context, dockerfile?} per image."
         required: true
         type: string
       manifest_dir:
-        description: "Path inside homelab repo whose manifests should be bumped. Empty = skip."
         required: false
         type: string
         default: ""
       manifest_repo:
-        description: "Repo to open the bump PR against."
         required: false
         type: string
         default: "gitupcourt/homelab"
 
 jobs:
-  build:
-    name: build ${{ matrix.image.name }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        image: ${{ fromJSON(inputs.images) }}
-    outputs:
-      sha_tag: ${{ steps.tag.outputs.sha_tag }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Compute tag
-        id: tag
-        run: |
-          short=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "sha_tag=sha-${short}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Compute image tags
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ inputs.app_name }}-${{ matrix.image.name }}
-          tags: |
-            type=raw,value=${{ steps.tag.outputs.sha_tag }}
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.image.context }}
-          file: ${{ matrix.image.dockerfile || format('{0}/Dockerfile', matrix.image.context) }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ inputs.app_name }}-${{ matrix.image.name }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.app_name }}-${{ matrix.image.name }}
-
-  bump-manifest:
-    name: bump homelab manifest
-    needs: build
-    if: ${{ inputs.manifest_dir != '' && github.ref_name == github.event.repository.default_branch }}
+  debug:
     runs-on: ubuntu-latest
     steps:
-      - name: Check PAT is configured
-        id: check
-        env:
-          PAT: ${{ secrets.HOMELAB_PAT }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::warning::HOMELAB_PAT org secret not set — skipping manifest bump."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout homelab
-        if: steps.check.outputs.skip != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.manifest_repo }}
-          token: ${{ secrets.HOMELAB_PAT }}
-          path: homelab
-
-      - name: Bump image tags
-        if: steps.check.outputs.skip != 'true'
-        id: bump
-        env:
-          SHA_TAG: ${{ needs.build.outputs.sha_tag }}
-          IMAGES_JSON: ${{ inputs.images }}
-          APP: ${{ inputs.app_name }}
-          MANIFEST_DIR: ${{ inputs.manifest_dir }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          cd homelab
-          for row in $(echo "$IMAGES_JSON" | jq -c '.[]'); do
-            name=$(echo "$row" | jq -r '.name')
-            pattern="ghcr.io/${OWNER}/${APP}-${name}"
-            find "$MANIFEST_DIR" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 \
-              | xargs -0 -I {} sed -i -E "s#(image:\s*)${pattern}:[A-Za-z0-9._-]+#\1${pattern}:${SHA_TAG}#g" {}
-          done
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff --stat
-          fi
-
-      - name: Open PR
-        if: steps.check.outputs.skip != 'true' && steps.bump.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          path: homelab
-          token: ${{ secrets.HOMELAB_PAT }}
-          branch: bump/${{ inputs.app_name }}/${{ needs.build.outputs.sha_tag }}
-          commit-message: "${{ inputs.app_name }}: bump to ${{ needs.build.outputs.sha_tag }}"
-          title: "${{ inputs.app_name }}: bump to ${{ needs.build.outputs.sha_tag }}"
-          body: |
-            Automated bump from CI in `${{ github.repository }}` @ ${{ github.sha }}.
-            **App:** `${{ inputs.app_name }}` · **New tag:** `${{ needs.build.outputs.sha_tag }}`
-            Build run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          delete-branch: true
+      - run: |
+          echo "app_name=${{ inputs.app_name }}"
+          echo "manifest_dir=${{ inputs.manifest_dir }}"
+          echo "images=${{ inputs.images }}"
