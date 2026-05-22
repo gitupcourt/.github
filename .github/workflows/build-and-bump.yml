@@ -9,20 +9,15 @@ on:
       images:
         required: true
         type: string
-      manifest_dir:
-        required: false
-        type: string
-        default: ""
-      manifest_repo:
-        required: false
-        type: string
-        default: "gitupcourt/homelab"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         image: ${{ fromJSON(inputs.images) }}
     steps:
-      - run: echo "image=${{ matrix.image.name }}"
+      - run: echo "${{ matrix.image.name }}"
