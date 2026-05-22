@@ -19,10 +19,48 @@ on:
         default: "gitupcourt/homelab"
 
 jobs:
-  debug:
+  build:
+    name: build ${{ matrix.image.name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    outputs:
+      sha_tag: ${{ steps.tag.outputs.sha_tag }}
     steps:
-      - run: |
-          echo "app_name=${{ inputs.app_name }}"
-          echo "manifest_dir=${{ inputs.manifest_dir }}"
-          echo "images=${{ inputs.images }}"
+      - uses: actions/checkout@v4
+      - name: Compute tag
+        id: tag
+        run: |
+          short=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "sha_tag=sha-${short}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ inputs.app_name }}-${{ matrix.image.name }}
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.sha_tag }}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile || format('{0}/Dockerfile', matrix.image.context) }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.app_name }}-${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.app_name }}-${{ matrix.image.name }}
