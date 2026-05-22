@@ -20,15 +20,9 @@ on:
 
 jobs:
   build:
-    name: build ${{ matrix.image.name }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     strategy:
-      fail-fast: false
       matrix:
         image: ${{ fromJSON(inputs.images) }}
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "image=${{ matrix.image.name }} ctx=${{ matrix.image.context }}"
+      - run: echo "image=${{ matrix.image.name }}"
